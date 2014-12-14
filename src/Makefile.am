@@ -14,6 +14,7 @@ AM_CFLAGS =\
 	 -Wall\
 	 -g
 
+bindir = $(prefix)/itrain
 bin_PROGRAMS = itrain
 
 itrain_SOURCES = \
@@ -24,3 +25,5 @@ itrain_LDFLAGS =
 
 itrain_LDADD = $(ITRAIN_LIBS) 
 
+SUBDIRS = \
+	config

@@ -18,5 +18,6 @@ PKG_CHECK_MODULES(ITRAIN, [zlib libzmq libczmq libffi gobject-2.0 gmodule-2.0 js
 AC_OUTPUT([
 Makefile
 src/Makefile
+src/config/Makefile
 
 ])
