@@ -3,21 +3,24 @@
 #include <stdlib.h>
 #include "itrain.h"
 
-typedef struct _IpcamItrainPrivate
+#include "ipcam-itrain-server.h"
+
+typedef struct _IpcamITrainPrivate
 {
+    IpcamITrainServer *itrain_server;
     GHashTable *connection_hash;
     GMutex connection_mutex;
-} IpcamItrainPrivate;
+} IpcamITrainPrivate;
 
-typedef struct _IpcamItrainConnectionHashValue
+typedef struct _IpcamITrainConnectionHashValue
 {
     GSocket *socket;
     guint timeout;
-} IpcamItrainConnectionHashValue;
+} IpcamITrainConnectionHashValue;
 
-#define CONNECTION IpcamItrainConnectionHashValue
+#define CONNECTION IpcamITrainConnectionHashValue
 
-G_DEFINE_TYPE_WITH_PRIVATE(IpcamItrain, ipcam_itrain, IPCAM_BASE_APP_TYPE);
+G_DEFINE_TYPE_WITH_PRIVATE(IpcamITrain, ipcam_itrain, IPCAM_BASE_APP_TYPE);
 
 static void ipcam_itrain_before_start(IpcamBaseService *base_service);
 static void ipcam_itrain_in_loop(IpcamBaseService *base_service);
@@ -30,7 +33,10 @@ static void connection_value_destroy_func(gpointer value)
 
 static void ipcam_itrain_finalize(GObject *object)
 {
-    IpcamItrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
+
+    g_object_unref(priv->itrain_server);
+
     g_mutex_lock(&priv->connection_mutex);
     g_hash_table_remove_all(priv->connection_hash);
     g_object_unref(priv->connection_hash);
@@ -40,9 +46,9 @@ static void ipcam_itrain_finalize(GObject *object)
     G_OBJECT_CLASS(ipcam_itrain_parent_class)->finalize(object);
 }
 
-static void ipcam_itrain_init(IpcamItrain *self)
+static void ipcam_itrain_init(IpcamITrain *self)
 {
-    IpcamItrainPrivate *priv = ipcam_itrain_get_instance_private(self);
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(self);
     g_mutex_init(&priv->connection_mutex);
     priv->connection_hash = g_hash_table_new_full(g_str_hash,
                                                   g_str_equal,
@@ -50,7 +56,7 @@ static void ipcam_itrain_init(IpcamItrain *self)
                                                   connection_value_destroy_func);
 }
 
-static void ipcam_itrain_class_init(IpcamItrainClass *klass)
+static void ipcam_itrain_class_init(IpcamITrainClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
     object_class->finalize = &ipcam_itrain_finalize;
@@ -62,13 +68,18 @@ static void ipcam_itrain_class_init(IpcamItrainClass *klass)
 
 static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 {
-    IpcamItrain *itrain = IPCAM_ITRAIN(base_service);
-    IpcamItrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
-    const gchar *ajax_addr = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "ajax:address");
-    const gchar *port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "ajax:port");
+    IpcamITrain *itrain = IPCAM_ITRAIN(base_service);
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
+    const gchar *addr = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:address");
+    const gchar *port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:port");
 
-    if (ajax_addr != NULL && port != NULL)
+    if (addr != NULL && port != NULL)
     {
+        priv->itrain_server = g_object_new(IPCAM_TYPE_ITRAIN_SERVER,
+                                           "itrain", itrain,
+                                           "address", addr,
+                                           "port", strtoul(port, NULL, 0),
+                                           NULL);
     }
 }
 

@@ -21,7 +21,7 @@
 
 int main()
 {
-	IpcamItrain *itrain = g_object_new(IPCAM_ITRAIN_TYPE, "name", "itrain", NULL);
+	IpcamITrain *itrain = g_object_new(IPCAM_TYPE_ITRAIN, "name", "itrain", NULL);
 	ipcam_base_service_start(IPCAM_BASE_SERVICE(itrain));
 	return (0);
 }
