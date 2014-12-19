@@ -10,6 +10,8 @@
 
 #include <glib-object.h>
 
+#define MSGTYPE_HEARTBEAT_REQUEST       0x01
+#define MSGTYPE_HEARTBEAT_RESPONSE      0x51
 #define MSGTYPE_SETIMAGEATTR_REQUEST    0x02
 #define MSGTYPE_GETIMAGEATTR_REQUEST    0x03
 #define MSGTYPE_GETIMAGEATTR_RESPONSE   0x53
@@ -19,6 +21,11 @@
 #define MSGTYPE_QUERYSTATUS_RESPONSE    0x58
 
 /* Payload definitions */
+
+typedef struct HeartBeatRequest
+{
+     guint8 dummy[0];
+} __attribute__((packed)) HeadBeatRequest;
 
 typedef struct SetImageAttrRequest
 {

@@ -5,31 +5,26 @@
 
 #include "ipcam-itrain-server.h"
 
+struct _IpcamITrainTimer
+{
+    gpointer                user_data;
+    guint                   timeout_sec;
+    guint                   counter;
+    IpcamITrainTimerHandler *handler;
+};
+
 typedef struct _IpcamITrainPrivate
 {
-    IpcamITrainServer *itrain_server;
-    GHashTable *connection_hash;
-    GMutex connection_mutex;
+    IpcamITrainServer       *itrain_server;
+    GHashTable              *timer_hash;
+    GMutex                  timer_lock;
 } IpcamITrainPrivate;
-
-typedef struct _IpcamITrainConnectionHashValue
-{
-    GSocket *socket;
-    guint timeout;
-} IpcamITrainConnectionHashValue;
-
-#define CONNECTION IpcamITrainConnectionHashValue
 
 G_DEFINE_TYPE_WITH_PRIVATE(IpcamITrain, ipcam_itrain, IPCAM_BASE_APP_TYPE);
 
 static void ipcam_itrain_before_start(IpcamBaseService *base_service);
 static void ipcam_itrain_in_loop(IpcamBaseService *base_service);
-
-static void connection_value_destroy_func(gpointer value)
-{
-    CONNECTION *conn = (CONNECTION *)value;
-    g_free(conn);
-}
+static void ipcam_itrain_timer_handler(GObject *obj);
 
 static void ipcam_itrain_finalize(GObject *object)
 {
@@ -37,11 +32,10 @@ static void ipcam_itrain_finalize(GObject *object)
 
     g_object_unref(priv->itrain_server);
 
-    g_mutex_lock(&priv->connection_mutex);
-    g_hash_table_remove_all(priv->connection_hash);
-    g_object_unref(priv->connection_hash);
-    g_mutex_unlock(&priv->connection_mutex);
-    g_mutex_clear(&priv->connection_mutex);
+    g_mutex_lock(&priv->timer_lock);
+    g_hash_table_destroy(priv->timer_hash);
+    g_mutex_unlock(&priv->timer_lock);
+    g_mutex_clear(&priv->timer_lock);
     
     G_OBJECT_CLASS(ipcam_itrain_parent_class)->finalize(object);
 }
@@ -49,11 +43,12 @@ static void ipcam_itrain_finalize(GObject *object)
 static void ipcam_itrain_init(IpcamITrain *self)
 {
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(self);
-    g_mutex_init(&priv->connection_mutex);
-    priv->connection_hash = g_hash_table_new_full(g_str_hash,
-                                                  g_str_equal,
-                                                  g_free,
-                                                  connection_value_destroy_func);
+
+    g_mutex_init(&priv->timer_lock);
+    priv->timer_hash = g_hash_table_new_full(g_direct_hash,
+                                             g_direct_equal,
+                                             NULL,
+                                             g_free);
 }
 
 static void ipcam_itrain_class_init(IpcamITrainClass *klass)
@@ -80,6 +75,9 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
                                            "address", addr,
                                            "port", strtoul(port, NULL, 0),
                                            NULL);
+        ipcam_base_app_add_timer(IPCAM_BASE_APP(itrain),
+                                 "itrain-timer-source", "1",
+                                 ipcam_itrain_timer_handler);
     }
 }
 
@@ -87,4 +85,59 @@ static void ipcam_itrain_in_loop(IpcamBaseService *base_service)
 {
 }
 
+static void
+ipcam_itrain_timer_handler(GObject *obj)
+{
+    GHashTableIter iter;
+    gpointer key, value;
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(obj));
 
+    g_mutex_lock(&priv->timer_lock);
+    g_hash_table_iter_init(&iter, priv->timer_hash);
+    while (g_hash_table_iter_next (&iter, &key, &value)) {
+        IpcamITrainTimer *timer = (IpcamITrainTimer *)key;
+
+        if (--timer->counter == 0) {
+            timer->handler(timer->user_data);
+            timer->counter = timer->timeout_sec;    /* Reload the counter */
+        }
+    }
+    g_mutex_unlock(&priv->timer_lock);
+}
+
+IpcamITrainTimer *
+ipcam_itrain_add_timer(IpcamITrain *itrain, guint timeout_sec,
+                       IpcamITrainTimerHandler *handler, gpointer user_data)
+{
+    IpcamITrainTimer *timer;
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
+
+    timer = g_malloc0(sizeof(*timer));
+    if (!timer)
+        return NULL;
+
+    timer->user_data = user_data;
+    timer->timeout_sec = timeout_sec;
+    timer->counter = timeout_sec;
+    timer->handler = handler;
+
+    g_mutex_lock(&priv->timer_lock);
+    g_hash_table_add(priv->timer_hash, timer);
+    g_mutex_unlock(&priv->timer_lock);
+
+    return timer;
+}
+
+void ipcam_itrain_del_timer(IpcamITrain *itrain, IpcamITrainTimer *timer)
+{
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
+
+    g_mutex_lock(&priv->timer_lock);
+    g_hash_table_remove(priv->timer_hash, timer);
+    g_mutex_unlock (&priv->timer_lock);
+}
+
+void ipcam_itrain_timer_reset(IpcamITrainTimer *timer)
+{
+    timer->counter = timer->timeout_sec;
+}

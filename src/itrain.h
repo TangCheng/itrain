@@ -24,6 +24,18 @@ struct _IpcamITrainClass
   IpcamBaseAppClass parent_class;
 };
 
+typedef void IpcamITrainTimerHandler(gpointer user_data);
+
+struct _IpcamITrainTimer;
+typedef struct _IpcamITrainTimer IpcamITrainTimer;
+
 GType ipcam_itrain_get_type(void);
+
+IpcamITrainTimer *ipcam_itrain_add_timer(IpcamITrain *itrain,
+                                         guint timeout_sec,
+                                         IpcamITrainTimerHandler *handler,
+                                         gpointer user_data);
+void ipcam_itrain_del_timer(IpcamITrain *itrain, IpcamITrainTimer *timer);
+void ipcam_itrain_timer_reset(IpcamITrainTimer *timer);
 
 #endif /* __ITRAIN_H__ */

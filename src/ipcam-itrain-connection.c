@@ -175,7 +175,7 @@ ipcam_connection_get_message (IpcamConnection *connection)
     IpcamConnectionPrivate *priv = connection->priv;
     IpcamITrainMessage *message = NULL;
     GSocket *sock = priv->socket;
-    guint8 buf[1024];
+    char buf[1024];
     gssize rcv_len;
 
     while (TRUE) {
@@ -220,27 +220,27 @@ gboolean
 ipcam_connection_send_message (IpcamConnection *connection, IpcamITrainMessage *message)
 {
     IpcamConnectionPrivate *priv = connection->priv;
+    TrainProtocolHeader *head;
     GSocket *sock = priv->socket;
     gpointer payload;
     guint payload_len;
+    guint8 *msg;
 
     payload = ipcam_itrain_message_get_payload(message, &payload_len);
-    if (payload) {
-        TrainProtocolHeader *head;
-        guint8 *p;
-        guint msg_len = sizeof(*head) + payload_len + 1;
 
-        p = g_malloc(msg_len);
-        if (p) {
-            head = (TrainProtocolHeader*)p;
-            head->start = 0xff;
-            head->type = ipcam_itrain_message_get_message_type(message);
-            head->len = htons(payload_len);
+    guint msg_len = sizeof(*head) + payload_len + 1;
+
+    msg = g_malloc(msg_len);
+    if (msg) {
+        head = (TrainProtocolHeader*)msg;
+        head->start = 0xff;
+        head->type = ipcam_itrain_message_get_message_type(message);
+        head->len = htons(payload_len);
+        if (payload)
             memcpy(head->data, payload, payload_len);
-            p[msg_len - 1] = train_protocol_checksum(p, msg_len - 1);
-            if (g_socket_send(sock, (gchar *)p, msg_len, NULL, NULL) > 0)
-                return TRUE;
-        }
+        msg[msg_len - 1] = train_protocol_checksum(msg, msg_len - 1);
+        if (g_socket_send(sock, (gchar *)msg, msg_len, NULL, NULL) > 0)
+            return TRUE;
     }
 
     return FALSE;

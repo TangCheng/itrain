@@ -76,7 +76,7 @@ ipcam_itrain_server_constructor(GType gtype,
                                        itrain_server);
 
     priv->thread_pool = g_thread_pool_new(itrain_connection_handler,
-                                          itrain_server,
+                                          priv->itrain,
                                           10,
                                           FALSE,
                                           NULL);
@@ -90,7 +90,6 @@ ipcam_itrain_server_finalize (GObject *object)
     IpcamITrainServer *itrain_server = IPCAM_ITRAIN_SERVER(object);
     IpcamITrainServerPrivate *priv = itrain_server->priv;
 
-    /* TODO: Add deinitalization code here */
     g_free(priv->address);
     g_thread_pool_free(priv->thread_pool, TRUE, TRUE);
     priv->terminated = TRUE;
@@ -189,18 +188,12 @@ ipcam_itrain_server_class_init (IpcamITrainServerClass *klass)
                                      g_param_spec_uint ("port",
                                                         "Server Port",
                                                         "Server Port",
-                                                        0, /* TODO: Adjust minimum property value */
-                                                        G_MAXUINT, /* TODO: Adjust maximum property value */
+                                                        0,
+                                                        G_MAXUINT,
                                                         10100,
                                                         G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
 }
 
-struct _IpcamITrainConnection
-{
-    IpcamITrain *itrain;
-    GThread *thread;
-    GSocket *sock;
-};
 typedef struct _IpcamITrainConnection IpcamITrainConnection;
 
 static gpointer
@@ -262,17 +255,36 @@ itrain_server_handler(gpointer data)
 }
 
 static void
+ipcam_connection_heartbeat(gpointer user_data)
+{
+    IpcamITrainMessage *message;
+    IpcamConnection *connection = IPCAM_CONNECTION(user_data);
+
+    message = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, "user_data", user_data, NULL);
+    ipcam_itrain_message_set_message_type (message, 0x01);
+    ipcam_itrain_message_set_payload (message, NULL, 0);
+
+    ipcam_connection_send_message (connection, message);
+}
+
+static void
 itrain_connection_handler(gpointer data, gpointer user_data)
 {
+    IpcamITrain *itrain = IPCAM_ITRAIN(user_data);
     IpcamConnection *connection = IPCAM_CONNECTION(data);
     IpcamITrainMessage *message;
+    IpcamITrainTimer *timer;
 
     ipcam_proto_register_all_handlers (connection);
+
+    timer = ipcam_itrain_add_timer(itrain, 5, ipcam_connection_heartbeat, connection); 
 
     while ((message = ipcam_connection_get_message (connection)) != NULL) {
         ipcam_connection_dispatch_message (connection, message);
         g_object_unref(message);
     }
+
+    ipcam_itrain_del_timer(itrain, timer);
 
     g_object_unref(connection);
 }

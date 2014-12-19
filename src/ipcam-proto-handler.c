@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <netinet/in.h>
 #include <json-glib/json-glib.h>
 #include <request_message.h>
 #include "itrain.h"
@@ -213,7 +214,7 @@ ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
             htons(payload->version = maj * 100 + min * 10 + rev);
         strncpy((char *)payload->manufacturer, "EASYWAY", sizeof(payload->manufacturer));
     }
-
+    /* always online */
     payload->online_state = 0x01;
 
     g_object_unref(builder);
