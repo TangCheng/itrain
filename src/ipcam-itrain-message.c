@@ -205,7 +205,7 @@ void ipcam_itrain_message_set_payload(IpcamITrainMessage *message, gpointer payl
         priv->length = 0;
     }
 
-    if (priv->payload && priv->length) {
+    if (payload && length) {
         priv->payload = payload;
         priv->length = length;
     }

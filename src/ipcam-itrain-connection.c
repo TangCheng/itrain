@@ -188,7 +188,7 @@ ipcam_connection_get_message (IpcamConnection *connection)
         rcv_len = g_socket_receive(sock, buf, sizeof(buf), NULL, NULL);
         if (rcv_len <= 0)
             break;
-        if (rcv_len <= sizeof(*head))
+        if (rcv_len < sizeof(*head))
             continue;
         head = (TrainProtocolHeader *)buf;
         /* check start condition */
@@ -196,7 +196,15 @@ ipcam_connection_get_message (IpcamConnection *connection)
             continue;
         payload_len = ntohs(head->len);
         msg_len = sizeof(*head) + payload_len + 1; /* head + payload + checksum */
+        /* discard very large packet */
+        if (msg_len > sizeof(buf))
+            continue;
         /* check length */
+        while (rcv_len < msg_len) {
+            gssize rlen = g_socket_receive(sock, buf + rcv_len, msg_len - rcv_len, NULL, NULL);
+            if (rcv_len < 0)
+                break;
+        }
         if (rcv_len < msg_len) {
             g_warning("message too small.\n");
             continue;
@@ -207,13 +215,15 @@ ipcam_connection_get_message (IpcamConnection *connection)
             /*g_warning("checksum not match.\n");*/
             continue;
         }
-        payload = g_memdup(head->data, head->len);
+        payload = g_memdup(head->data, payload_len);
         message = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, NULL);
         ipcam_itrain_message_set_message_type (message, head->type);
-        ipcam_itrain_message_set_payload (message, payload, head->len);
+        ipcam_itrain_message_set_payload (message, payload, payload_len);
+
+        return message;
     }
 
-    return message;
+    return NULL;
 }
 
 gboolean
