@@ -16,6 +16,10 @@ struct _IpcamConnectionPrivate
      gpointer user_data;
      GSocket *socket;
      GHashTable *proto_handler;
+
+     gpointer buffer;
+     guint buffer_size;
+     guint data_len;
 };
 
 
@@ -24,21 +28,29 @@ enum
     PROP_0,
 
     PROP_USERDATA,
-    PROP_SOCKET
+    PROP_SOCKET,
+    PROP_BUFFER_SIZE
 };
 
-
+#define PACKET_START        0xFF
+#define DEFAULT_BUFFER_SIZE 1024
 
 G_DEFINE_TYPE (IpcamConnection, ipcam_connection, G_TYPE_OBJECT);
 
 static void
 ipcam_connection_init (IpcamConnection *ipcam_connection)
 {
-    ipcam_connection->priv = G_TYPE_INSTANCE_GET_PRIVATE (ipcam_connection, IPCAM_TYPE_CONNECTION, IpcamConnectionPrivate);
+    IpcamConnectionPrivate *priv;
 
-    ipcam_connection->priv->user_data = NULL;
-    ipcam_connection->priv->socket = NULL;
-    ipcam_connection->priv->proto_handler = g_hash_table_new(g_direct_hash, g_direct_equal);
+    priv = G_TYPE_INSTANCE_GET_PRIVATE (ipcam_connection, IPCAM_TYPE_CONNECTION, IpcamConnectionPrivate);
+    ipcam_connection->priv = priv;
+
+    priv->user_data = NULL;
+    priv->socket = NULL;
+    priv->proto_handler = g_hash_table_new(g_direct_hash, g_direct_equal);
+    priv->buffer = g_malloc(DEFAULT_BUFFER_SIZE);
+    priv->buffer_size = DEFAULT_BUFFER_SIZE;
+    priv->data_len = 0;
 }
 
 static void
@@ -50,6 +62,8 @@ ipcam_connection_finalize (GObject *object)
 
     g_hash_table_destroy (connection->priv->proto_handler);
 
+    g_free(connection->priv->buffer);
+
     G_OBJECT_CLASS (ipcam_connection_parent_class)->finalize (object);
 }
 
@@ -58,6 +72,7 @@ ipcam_connection_set_property (GObject *object, guint prop_id, const GValue *val
 {
     IpcamConnection *connection;
     IpcamConnectionPrivate *priv;
+    guint buffer_size;
 
     g_return_if_fail (IPCAM_IS_CONNECTION (object));
 
@@ -71,6 +86,15 @@ ipcam_connection_set_property (GObject *object, guint prop_id, const GValue *val
         break;
     case PROP_SOCKET:
         priv->socket = g_value_get_object(value);
+        break;
+    case PROP_BUFFER_SIZE:
+        buffer_size = g_value_get_uint(value);
+        if (buffer_size > 0 && buffer_size != priv->buffer_size) {
+            priv->buffer_size = g_value_get_uint(value);
+            priv->buffer = g_realloc(priv->buffer, buffer_size);
+            if (priv->data_len > priv->buffer_size)
+                priv->data_len = priv->buffer_size;
+        }
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -96,6 +120,9 @@ ipcam_connection_get_property (GObject *object, guint prop_id, GValue *value, GP
         break;
     case PROP_SOCKET:
         g_value_set_object(value, priv->socket);
+        break;
+    case PROP_BUFFER_SIZE:
+        g_value_set_uint(value, priv->buffer_size);
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -128,6 +155,16 @@ ipcam_connection_class_init (IpcamConnectionClass *klass)
                                                           "Client Socket",
                                                           G_TYPE_SOCKET,
                                                           G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
+
+    g_object_class_install_property (object_class,
+                                     PROP_BUFFER_SIZE,
+                                     g_param_spec_uint ("buffer_size",
+                                                        "Receive Buffer Size",
+                                                        "Receive Buffer Size",
+                                                        128,
+                                                        G_MAXUINT16,
+                                                        1024,
+                                                        G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
 }
 
 
@@ -175,8 +212,10 @@ ipcam_connection_get_message (IpcamConnection *connection)
     IpcamConnectionPrivate *priv = connection->priv;
     IpcamITrainMessage *message = NULL;
     GSocket *sock = priv->socket;
-    char buf[1024];
     gssize rcv_len;
+    guint data_len = priv->data_len;
+
+    g_socket_set_blocking(sock, TRUE);
 
     while (TRUE) {
         TrainProtocolHeader *head;
@@ -185,40 +224,76 @@ ipcam_connection_get_message (IpcamConnection *connection)
         guint msg_len;
         guint8 checksum;
 
-        rcv_len = g_socket_receive(sock, buf, sizeof(buf), NULL, NULL);
-        if (rcv_len <= 0)
-            break;
-        if (rcv_len < sizeof(*head))
+        if (data_len < sizeof(*head)) {
+            rcv_len = g_socket_receive(sock, priv->buffer + data_len,
+                                       priv->buffer_size - data_len,
+                                       NULL, NULL);
+            if (rcv_len <= 0) {
+                priv->data_len = 0;
+                return NULL;
+            }
+
+            data_len += rcv_len;
+
             continue;
-        head = (TrainProtocolHeader *)buf;
-        /* check start condition */
-        if (head->start != 0xFF)
-            continue;
+        }
+
+        head = (TrainProtocolHeader *)priv->buffer;
+        /* lookup start condition */
+        if ( head->start != PACKET_START) {
+            while (head->start != PACKET_START && data_len > 0) {
+                head = (TrainProtocolHeader *)((gchar *)head + 1);
+                data_len--;
+            }
+            if (data_len > 0) {
+                memmove(priv->buffer, head, data_len);
+                head = (TrainProtocolHeader *)priv->buffer;
+            }
+            if (data_len < sizeof(*head)) {
+                continue;
+            }
+        }
+
         payload_len = ntohs(head->len);
         msg_len = sizeof(*head) + payload_len + 1; /* head + payload + checksum */
         /* discard very large packet */
-        if (msg_len > sizeof(buf))
+        if (msg_len > priv->buffer_size) {
+            data_len = 0;
             continue;
+        }
         /* check length */
-        while (rcv_len < msg_len) {
-            gssize rlen = g_socket_receive(sock, buf + rcv_len, msg_len - rcv_len, NULL, NULL);
-            if (rcv_len < 0)
-                break;
+        while (data_len < msg_len) {
+            rcv_len = g_socket_receive(sock, priv->buffer + data_len,
+                                       priv->buffer_size - data_len,
+                                       NULL, NULL);
+            if (rcv_len <= 0) {
+                priv->data_len = 0;
+                return NULL;
+            }
+            data_len += rcv_len;
         }
-        if (rcv_len < msg_len) {
-            g_warning("message too small.\n");
+
+        checksum = train_protocol_checksum((guint8*)head, msg_len - 1);
+        if (checksum != ((guint8*)head)[msg_len - 1]) {
+            g_warning("checksum not match [0x%02x=>0x%02x].\n",
+                      ((guint8*)head)[msg_len - 1], checksum);
+            data_len -= msg_len;
+            if (data_len) {
+                memmove(priv->buffer, priv->buffer + msg_len, data_len);
+            }
             continue;
         }
-        checksum = train_protocol_checksum((guint8*)buf, msg_len - 1);
-        if (checksum != buf[msg_len - 1]) {
-            g_warning("checksum is 0x%x, should be 0x%02x.\n", buf[msg_len - 1], checksum);
-            /*g_warning("checksum not match.\n");*/
-            continue;
-        }
+
         payload = g_memdup(head->data, payload_len);
         message = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, NULL);
         ipcam_itrain_message_set_message_type (message, head->type);
         ipcam_itrain_message_set_payload (message, payload, payload_len);
+
+        data_len -= msg_len;
+        if (data_len) {
+            memmove(priv->buffer, priv->buffer + msg_len, data_len);
+        }
+        priv->data_len = data_len;
 
         return message;
     }
