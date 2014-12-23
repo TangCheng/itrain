@@ -65,13 +65,13 @@ ipcam_proto_do_set_image_attr(IpcamITrain *itrain, SetImageAttrRequest *payload)
     json_builder_set_member_name(builder, "items");
     json_builder_begin_object(builder);
     json_builder_set_member_name(builder, "brightness");
-    json_builder_add_int_value(builder, payload->brightness);
+    json_builder_add_int_value(builder, payload->brightness * 100 / 255);
     json_builder_set_member_name(builder, "chrominance");
-    json_builder_add_int_value(builder, payload->chrominance);
+    json_builder_add_int_value(builder, payload->chrominance * 100 / 255);
     json_builder_set_member_name(builder, "saturation");
-    json_builder_add_int_value(builder, payload->saturation);
+    json_builder_add_int_value(builder, payload->saturation * 100 / 255);
     json_builder_set_member_name(builder, "contrast");
-    json_builder_add_int_value(builder, payload->contrast);
+    json_builder_add_int_value(builder, payload->contrast * 100 / 255);
     json_builder_end_object(builder);
     json_builder_end_object(builder);
 
@@ -102,10 +102,10 @@ ipcam_proto_do_get_image_attr(IpcamITrain *itrain, GetImageAttrResponse *payload
     ret = itrain_invocate_action(itrain, "get_image", json_builder_get_root(builder), &response);
     if (ret) {
         JsonObject *items = json_object_get_object_member(json_node_get_object(response), "items");
-        payload->brightness = json_object_get_int_member(items, "brightness");
-        payload->chrominance = json_object_get_int_member(items, "chrominance");
-        payload->saturation = json_object_get_int_member(items, "saturation");
-        payload->contrast = json_object_get_int_member(items, "contrast");
+        payload->brightness = json_object_get_int_member(items, "brightness") * 255 / 100;
+        payload->chrominance = json_object_get_int_member(items, "chrominance") * 255 / 100;
+        payload->saturation = json_object_get_int_member(items, "saturation") * 255 / 100;
+        payload->contrast = json_object_get_int_member(items, "contrast") * 255 / 100;
     }
 
     g_object_unref(builder);
