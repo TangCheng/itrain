@@ -244,7 +244,7 @@ itrain_server_handler(gpointer data)
 
         if (!g_thread_pool_push(priv->thread_pool, connection, NULL)) {
             g_socket_close(client_sock, NULL);
-            g_free(connection);
+            g_object_unref(connection);
         }
     }
 
