@@ -106,6 +106,8 @@ ipcam_proto_do_get_image_attr(IpcamITrain *itrain, GetImageAttrResponse *payload
         payload->chrominance = json_object_get_int_member(items, "chrominance") * 255 / 100;
         payload->saturation = json_object_get_int_member(items, "saturation") * 255 / 100;
         payload->contrast = json_object_get_int_member(items, "contrast") * 255 / 100;
+
+        json_node_free(response);
     }
 
     g_object_unref(builder);
@@ -192,6 +194,8 @@ ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
         JsonObject *items = json_object_get_object_member(json_node_get_object(response), "items");
         payload->carriage_num = json_object_get_int_member(items, "carriage_num");
         payload->position_num = json_object_get_int_member(items, "position_num");
+
+        json_node_free(response);
     }
 
     json_builder_reset(builder);
@@ -213,6 +217,8 @@ ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
         if (sscanf(ver, "%d.%d.%d", &maj, &min, &rev) == 3)
             htons(payload->version = maj * 100 + min * 10 + rev);
         strncpy((char *)payload->manufacturer, "EASYWAY", sizeof(payload->manufacturer));
+
+        json_node_free(response);
     }
     /* always online */
     payload->online_state = 0x01;

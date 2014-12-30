@@ -97,6 +97,8 @@ ipcam_itrain_timer_handler(GObject *obj)
     while (g_hash_table_iter_next (&iter, &key, &value)) {
         IpcamITrainTimer *timer = (IpcamITrainTimer *)key;
 
+        g_assert(timer && timer->handler);
+
         if (--timer->counter == 0) {
             timer->handler(timer->user_data);
             timer->counter = timer->timeout_sec;    /* Reload the counter */
