@@ -254,6 +254,7 @@ ipcam_proto_get_image_attr(IpcamConnection *connection, IpcamITrainMessage *mess
     GetImageAttrResponse *img_attr;
     IpcamITrainMessage *itrain_resp;
     IpcamITrain *itrain = (IpcamITrain *)ipcam_connection_get_userdata (connection);
+    gboolean result = FALSE;
 
     g_assert(IPCAM_IS_ITRAIN(itrain));
 
@@ -264,11 +265,10 @@ ipcam_proto_get_image_attr(IpcamConnection *connection, IpcamITrainMessage *mess
         itrain_resp = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, NULL);
         ipcam_itrain_message_set_message_type (itrain_resp, MSGTYPE_GETIMAGEATTR_RESPONSE);
         ipcam_itrain_message_set_payload (itrain_resp, img_attr, sizeof(*img_attr));
-        ipcam_connection_send_message (connection, itrain_resp);
+        result = ipcam_connection_send_message (connection, itrain_resp);
         g_object_unref(itrain_resp);
-        return TRUE;
     }
-    return FALSE;
+    return result;
 }
 
 gboolean
@@ -317,6 +317,7 @@ ipcam_proto_query_status(IpcamConnection *connection, IpcamITrainMessage *messag
     QueryStatusResponse *status;
     IpcamITrainMessage *itrain_resp;
     IpcamITrain *itrain = (IpcamITrain *)ipcam_connection_get_userdata (connection);
+    gboolean result = FALSE;
 
     g_assert(IPCAM_IS_ITRAIN(itrain));
 
@@ -327,11 +328,10 @@ ipcam_proto_query_status(IpcamConnection *connection, IpcamITrainMessage *messag
         itrain_resp = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, NULL);
         ipcam_itrain_message_set_message_type (itrain_resp, MSGTYPE_GETIMAGEATTR_RESPONSE);
         ipcam_itrain_message_set_payload (itrain_resp, status, sizeof(*status));
-        ipcam_connection_send_message (connection, itrain_resp);
+        result = ipcam_connection_send_message (connection, itrain_resp);
         g_object_unref(itrain_resp);
-        return TRUE;
     }
-    return FALSE;
+    return result;
 }
 
 void ipcam_proto_register_all_handlers(IpcamConnection *connection)

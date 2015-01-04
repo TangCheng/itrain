@@ -280,8 +280,13 @@ itrain_connection_handler(gpointer data, gpointer user_data)
     timer = ipcam_itrain_add_timer(itrain, 5, ipcam_connection_heartbeat, connection); 
 
     while ((message = ipcam_connection_get_message (connection)) != NULL) {
-        ipcam_connection_dispatch_message (connection, message);
+        gboolean ret;
+
+        ret = ipcam_connection_dispatch_message (connection, message);
         g_object_unref(message);
+
+        if (!ret)
+            break;
     }
 
     ipcam_itrain_del_timer(itrain, timer);
