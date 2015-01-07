@@ -1,6 +1,7 @@
 #ifndef __ITRAIN_H__
 #define __ITRAIN_H__
 
+#include <json-glib/json-glib.h>
 #include <gio/gio.h>
 #include <base_app.h>
 
@@ -31,11 +32,42 @@ typedef struct _IpcamITrainTimer IpcamITrainTimer;
 
 GType ipcam_itrain_get_type(void);
 
+const gpointer ipcam_itrain_get_property(IpcamITrain *itrain, const gchar *key);
+void ipcam_itrain_set_property(IpcamITrain *itrain, const gchar *key, gpointer value);
+
+static inline const gchar *ipcam_itrain_get_string_property(IpcamITrain *itrain, const gchar *key)
+{
+	return (const gchar *)ipcam_itrain_get_property(itrain, key);
+}
+
+static inline void ipcam_itrain_set_string_property(IpcamITrain *itrain, const gchar *key, const gchar *value)
+{
+	ipcam_itrain_set_property(itrain, g_strdup(key), g_strdup(value));
+}
+
+static inline gint ipcam_itrain_get_int_property(IpcamITrain *itrain, const gchar *key)
+{
+	gpointer pvalue = ipcam_itrain_get_property(itrain, key);
+
+	return pvalue ? *(gint *)pvalue : -1;
+}
+
+static inline void ipcam_itrain_set_int_property(IpcamITrain *itrain, gchar *key, gint value)
+{
+	gint *pvalue = g_malloc(sizeof(value));
+	*pvalue = value;
+	ipcam_itrain_set_property(itrain, g_strdup(key), pvalue);
+}
+
 IpcamITrainTimer *ipcam_itrain_add_timer(IpcamITrain *itrain,
                                          guint timeout_sec,
                                          IpcamITrainTimerHandler *handler,
                                          gpointer user_data);
 void ipcam_itrain_del_timer(IpcamITrain *itrain, IpcamITrainTimer *timer);
 void ipcam_itrain_timer_reset(IpcamITrainTimer *timer);
+
+void ipcam_itrain_video_occlusion_handler(IpcamITrain *itrain, JsonNode *body);
+void ipcam_itrain_update_base_info_setting(IpcamITrain *itrain, JsonNode *body);
+void ipcam_itrain_update_szyc_setting(IpcamITrain *itrain, JsonNode *body);
 
 #endif /* __ITRAIN_H__ */

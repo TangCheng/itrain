@@ -6,6 +6,7 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <netinet/in.h>
 #include <json-glib/json-glib.h>
@@ -177,55 +178,36 @@ ipcam_proto_do_timesync(IpcamITrain *itrain, TimeSyncRequest *payload)
 static gboolean
 ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
 {
-    gboolean ret;
-    JsonNode *response;
-    JsonBuilder *builder = json_builder_new();
+    const char *carriage_num, *position_num;
+    const char *device_type;
+    const char *fw_ver;
+    guint maj, min, rev;
 
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "items");
-    json_builder_begin_array(builder);
-    json_builder_add_string_value(builder, "carriage_num");
-    json_builder_add_string_value(builder, "position_num");
-    json_builder_end_array(builder);
-    json_builder_end_object(builder);
-
-    ret = itrain_invocate_action(itrain, "get_szyc", json_builder_get_root(builder), &response);
-    if (ret) {
-        JsonObject *items = json_object_get_object_member(json_node_get_object(response), "items");
-        payload->carriage_num = json_object_get_int_member(items, "carriage_num");
-        payload->position_num = json_object_get_int_member(items, "position_num");
-
-        json_node_free(response);
+    carriage_num = ipcam_itrain_get_string_property(itrain, "szyc:carriage_num");
+    position_num = ipcam_itrain_get_string_property(itrain, "szyc:position_num");
+    device_type = ipcam_itrain_get_string_property(itrain, "base_info:device_type");
+    fw_ver = ipcam_itrain_get_string_property(itrain, "base_info:firmware");
+    if (fw_ver && carriage_num && position_num) {
+        payload->carriage_num = strtoul(carriage_num, NULL, 0);
+        payload->position_num = strtoul(position_num, NULL, 0);
+        if (sscanf(fw_ver, "%d.%d.%d", &maj, &min, &rev) == 3)
+            payload->version = htons(maj * 100 + min * 10 + rev);
+        payload->online_state = 0x01;
+        if (device_type)
+            payload->camera_type = strtoul(device_type, NULL, 0);
+        else
+            payload->camera_type = 0;
     }
-
-    json_builder_reset(builder);
-
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "items");
-    json_builder_begin_array(builder);
-    json_builder_add_string_value(builder, "firmware");
-    json_builder_add_string_value(builder, "manufacturer");
-    json_builder_add_string_value(builder, "model");
-    json_builder_end_array(builder);
-    json_builder_end_object(builder);
-    ret = itrain_invocate_action(itrain, "get_base_info", json_builder_get_root(builder), &response);
-    if (ret) {
-        const gchar *ver;
-        guint maj, min, rev;
-        JsonObject *items = json_object_get_object_member(json_node_get_object(response), "items");
-        ver = json_object_get_string_member(items, "version");
-        if (sscanf(ver, "%d.%d.%d", &maj, &min, &rev) == 3)
-            htons(payload->version = maj * 100 + min * 10 + rev);
-        strncpy((char *)payload->manufacturer, "EASYWAY", sizeof(payload->manufacturer));
-
-        json_node_free(response);
+    else {
+        payload->carriage_num = 0;
+        payload->position_num = 0;
+        payload->version = 0;
+        payload->camera_type = 0;
+        payload->online_state = 0x00;
     }
-    /* always online */
-    payload->online_state = 0x01;
+    strncpy((char *)payload->manufacturer, "EASYWAY", sizeof(payload->manufacturer));
 
-    g_object_unref(builder);
-
-    return ret;
+    return TRUE;
 }
 
 gboolean
@@ -326,12 +308,18 @@ ipcam_proto_query_status(IpcamConnection *connection, IpcamITrainMessage *messag
 
     if (ipcam_proto_do_query_status (itrain, status)) {
         itrain_resp = g_object_new(IPCAM_TYPE_ITRAIN_MESSAGE, NULL);
-        ipcam_itrain_message_set_message_type (itrain_resp, MSGTYPE_GETIMAGEATTR_RESPONSE);
+        ipcam_itrain_message_set_message_type (itrain_resp, MSGTYPE_QUERYSTATUS_RESPONSE);
         ipcam_itrain_message_set_payload (itrain_resp, status, sizeof(*status));
         result = ipcam_connection_send_message (connection, itrain_resp);
         g_object_unref(itrain_resp);
     }
     return result;
+}
+
+gboolean
+ipcam_proto_heartbeat(IpcamConnection *connection, IpcamITrainMessage *message)
+{
+    return TRUE;
 }
 
 void ipcam_proto_register_all_handlers(IpcamConnection *connection)
@@ -351,4 +339,7 @@ void ipcam_proto_register_all_handlers(IpcamConnection *connection)
     ipcam_connection_register_message_handler(connection,
                                               MSGTYPE_QUERYSTATUS_REQUEST,
                                               ipcam_proto_query_status);
+    ipcam_connection_register_message_handler(connection,
+                                              MSGTYPE_HEARTBEAT_RESPONSE,
+                                              ipcam_proto_heartbeat);
 }

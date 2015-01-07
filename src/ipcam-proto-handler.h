@@ -19,6 +19,7 @@
 #define MSGTYPE_TIMESYNC_REQUEST        0x06
 #define MSGTYPE_QUERYSTATUS_REQUEST     0x08
 #define MSGTYPE_QUERYSTATUS_RESPONSE    0x58
+#define MSGTYPE_VIDEO_FAULT_EVENT       0x09
 
 /* Payload definitions */
 
@@ -88,6 +89,14 @@ typedef struct QueryStatusResponse
     guint8  manufacturer[10];
     guint16 version;
 } __attribute__((packed)) QueryStatusResponse;
+
+typedef struct VideoFaultEvent
+{
+    guint8 carriage_num;
+    guint8 position_num;
+    guint8 occlusion_stat;
+    guint8 loss_stat;
+} VideoFaultEvent;
 
 gboolean ipcam_proto_set_image_attr(IpcamConnection *connection, IpcamITrainMessage *message);
 gboolean ipcam_proto_get_image_attr(IpcamConnection *connection, IpcamITrainMessage *message);

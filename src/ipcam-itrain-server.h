@@ -37,6 +37,11 @@ struct _IpcamITrainServer
 };
 
 GType ipcam_itrain_server_get_type (void) G_GNUC_CONST;
+void ipcam_itrain_server_report_state(IpcamITrainServer *ipcam_itrain_server,
+                                      guint8 carriage_num,
+                                      guint8 position_num,
+                                      gboolean occlusion_stat, 
+                                      gboolean loss_stat);
 
 G_END_DECLS
 

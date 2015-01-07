@@ -60,9 +60,13 @@ ipcam_connection_finalize (GObject *object)
 
     g_return_if_fail(IPCAM_IS_CONNECTION(object));
 
+    g_socket_close(connection->priv->socket, NULL);
+
     g_hash_table_destroy (connection->priv->proto_handler);
 
     g_free(connection->priv->buffer);
+
+    g_object_unref(connection->priv->socket);
 
     G_OBJECT_CLASS (ipcam_connection_parent_class)->finalize (object);
 }
@@ -310,6 +314,7 @@ ipcam_connection_send_message (IpcamConnection *connection, IpcamITrainMessage *
     gpointer payload;
     guint payload_len;
     guint8 *msg;
+    gboolean ret = FALSE;
 
     payload = ipcam_itrain_message_get_payload(message, &payload_len);
 
@@ -324,11 +329,13 @@ ipcam_connection_send_message (IpcamConnection *connection, IpcamITrainMessage *
         if (payload)
             memcpy(head->data, payload, payload_len);
         msg[msg_len - 1] = train_protocol_checksum(msg, msg_len - 1);
-        if (g_socket_send(sock, (gchar *)msg, msg_len, NULL, NULL) > 0)
-            return TRUE;
+
+        ret = g_socket_send(sock, (gchar *)msg, msg_len, NULL, NULL) > 0;
+
+        g_free(msg);
     }
 
-    return FALSE;
+    return ret;
 }
 
 gboolean

@@ -27,7 +27,9 @@ itrain_SOURCES = \
 	ipcam-itrain-message.c \
 	ipcam-itrain-message.h \
 	ipcam-proto-handler.c \
-	ipcam-proto-handler.h
+	ipcam-proto-handler.h \
+	ipcam-itrain-event-handler.c \
+	ipcam-itrain-event-handler.h
 
 itrain_LDFLAGS = 
 
