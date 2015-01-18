@@ -190,8 +190,12 @@ ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
     if (fw_ver && carriage_num && position_num) {
         payload->carriage_num = strtoul(carriage_num, NULL, 0);
         payload->position_num = strtoul(position_num, NULL, 0);
-        if (sscanf(fw_ver, "%d.%d.%d", &maj, &min, &rev) == 3)
+        if (sscanf(fw_ver, "%d.%d.%d", &maj, &min, &rev) == 3) {
+            maj = maj <= 9 ? maj : (maj / 10);
+            min = min <= 9 ? min : (min / 10);
+            rev = rev <= 9 ? rev : (rev / 10);
             payload->version = htons(maj * 100 + min * 10 + rev);
+        }
         payload->online_state = 0x01;
         if (device_type)
             payload->camera_type = strtoul(device_type, NULL, 0);
