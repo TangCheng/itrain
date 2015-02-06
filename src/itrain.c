@@ -11,8 +11,8 @@
 struct _IpcamITrainTimer
 {
     gpointer                user_data;
-    guint                   timeout_sec;
-    guint                   counter;
+    guint                   timeout_usec;
+    gint64                  time_base;
     IpcamITrainTimerHandler *handler;
 };
 
@@ -33,11 +33,19 @@ static void ipcam_itrain_timer_handler(GObject *obj);
 static void base_info_message_handler(GObject *obj, IpcamMessage *msg, gboolean timeout);
 static void szyc_message_handler(GObject *obj, IpcamMessage *msg, gboolean timeout);
 
-static void ipcam_itrain_finalize(GObject *object)
+static void ipcam_itrain_dispose(GObject *object)
 {
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
 
-    g_object_unref(priv->itrain_server);
+    if (priv->itrain_server) {
+        g_object_run_dispose(G_OBJECT(priv->itrain_server));
+        g_clear_object(&priv->itrain_server);
+    }
+}
+
+static void ipcam_itrain_finalize(GObject *object)
+{
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
 
     g_mutex_lock(&priv->timer_lock);
     g_hash_table_destroy(priv->timer_hash);
@@ -68,6 +76,7 @@ static void ipcam_itrain_init(IpcamITrain *self)
 static void ipcam_itrain_class_init(IpcamITrainClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->dispose = &ipcam_itrain_dispose;
     object_class->finalize = &ipcam_itrain_finalize;
     
     IpcamBaseServiceClass *base_service_class = IPCAM_BASE_SERVICE_CLASS(klass);
@@ -95,9 +104,6 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
                                        "address", addr,
                                        "port", strtoul(port, NULL, 0),
                                        NULL);
-    ipcam_base_app_add_timer(IPCAM_BASE_APP(itrain),
-                             "itrain-timer-source", "1",
-                             ipcam_itrain_timer_handler);
 
     ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(itrain), "video_occlusion_event", IPCAM_TYPE_ITRAIN_EVENT_HANDLER);
     ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(itrain), "set_base_info", IPCAM_TYPE_ITRAIN_EVENT_HANDLER);
@@ -152,6 +158,9 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 
 static void ipcam_itrain_in_loop(IpcamBaseService *base_service)
 {
+    IpcamITrain *itrain = IPCAM_ITRAIN(base_service);
+
+    ipcam_itrain_timer_handler(G_OBJECT(itrain));
 }
 
 const gpointer ipcam_itrain_get_property(IpcamITrain *itrain, const gchar *key)
@@ -180,6 +189,7 @@ ipcam_itrain_timer_handler(GObject *obj)
 {
     GHashTableIter iter;
     gpointer key, value;
+    gint64 now = g_get_monotonic_time();
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(obj));
 
     g_mutex_lock(&priv->timer_lock);
@@ -189,9 +199,9 @@ ipcam_itrain_timer_handler(GObject *obj)
 
         g_assert(timer && timer->handler);
 
-        if (--timer->counter == 0) {
+        if (now - timer->time_base >= timer->timeout_usec) {
+            timer->time_base += timer->timeout_usec;
             timer->handler(timer->user_data);
-            timer->counter = timer->timeout_sec;    /* Reload the counter */
         }
     }
     g_mutex_unlock(&priv->timer_lock);
@@ -209,8 +219,8 @@ ipcam_itrain_add_timer(IpcamITrain *itrain, guint timeout_sec,
         return NULL;
 
     timer->user_data = user_data;
-    timer->timeout_sec = timeout_sec;
-    timer->counter = timeout_sec;
+    timer->timeout_usec = timeout_sec * 1000000;
+    timer->time_base = g_get_monotonic_time();
     timer->handler = handler;
 
     g_mutex_lock(&priv->timer_lock);
@@ -231,7 +241,7 @@ void ipcam_itrain_del_timer(IpcamITrain *itrain, IpcamITrainTimer *timer)
 
 void ipcam_itrain_timer_reset(IpcamITrainTimer *timer)
 {
-    timer->counter = timer->timeout_sec;
+    timer->time_base = g_get_monotonic_time();
 }
 
 void ipcam_itrain_video_occlusion_handler(IpcamITrain *itrain, JsonNode *body)
