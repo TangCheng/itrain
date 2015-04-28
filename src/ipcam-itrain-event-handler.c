@@ -17,7 +17,7 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "itrain.h"
+#include "ipcam-itrain.h"
 #include "ipcam-itrain-event-handler.h"
 
 
@@ -58,6 +58,4 @@ ipcam_itrain_event_handler_run_impl(IpcamEventHandler *event_handler,
         ipcam_itrain_update_base_info_setting(itrain, body);
     else if (g_strcmp0(event, "set_szyc") == 0)
         ipcam_itrain_update_szyc_setting(itrain, body);
-
-    g_free(event);
 }

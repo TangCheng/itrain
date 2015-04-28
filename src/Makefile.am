@@ -19,17 +19,19 @@ bin_PROGRAMS = itrain
 
 itrain_SOURCES = \
 	main.c \
-	itrain.c \
+	ipcam-itrain.c \
+	ipcam-itrain.h \
+	ipcam-proto-interface.h \
 	ipcam-itrain-server.c \
 	ipcam-itrain-server.h \
-	ipcam-itrain-connection.c \
-	ipcam-itrain-connection.h \
 	ipcam-itrain-message.c \
 	ipcam-itrain-message.h \
-	ipcam-proto-handler.c \
-	ipcam-proto-handler.h \
 	ipcam-itrain-event-handler.c \
-	ipcam-itrain-event-handler.h
+	ipcam-itrain-event-handler.h \
+	ipcam-dctx-proto-handler.c \
+	ipcam-dctx-proto-handler.h \
+	ipcam-dttx-proto-handler.c \
+	ipcam-dttx-proto-handler.h
 
 itrain_LDFLAGS = 
 

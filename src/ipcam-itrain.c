@@ -1,26 +1,17 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <json-glib/json-glib.h>
 #include <request_message.h>
-#include "itrain.h"
+#include "ipcam-itrain.h"
 
 #include "ipcam-itrain-server.h"
 #include "ipcam-itrain-event-handler.h"
 
-struct _IpcamITrainTimer
-{
-    gpointer                user_data;
-    guint                   timeout_usec;
-    gint64                  time_base;
-    IpcamITrainTimerHandler *handler;
-};
-
 typedef struct _IpcamITrainPrivate
 {
     IpcamITrainServer       *itrain_server;
-    GMutex                  timer_lock;
-    GHashTable              *timer_hash;
     GMutex                  prop_mutex;
     GHashTable              *cached_properties;
 } IpcamITrainPrivate;
@@ -29,28 +20,14 @@ G_DEFINE_TYPE_WITH_PRIVATE(IpcamITrain, ipcam_itrain, IPCAM_BASE_APP_TYPE);
 
 static void ipcam_itrain_before_start(IpcamBaseService *base_service);
 static void ipcam_itrain_in_loop(IpcamBaseService *base_service);
-static void ipcam_itrain_timer_handler(GObject *obj);
 static void base_info_message_handler(GObject *obj, IpcamMessage *msg, gboolean timeout);
 static void szyc_message_handler(GObject *obj, IpcamMessage *msg, gboolean timeout);
-
-static void ipcam_itrain_dispose(GObject *object)
-{
-    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
-
-    if (priv->itrain_server) {
-        g_object_run_dispose(G_OBJECT(priv->itrain_server));
-        g_clear_object(&priv->itrain_server);
-    }
-}
 
 static void ipcam_itrain_finalize(GObject *object)
 {
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(object));
 
-    g_mutex_lock(&priv->timer_lock);
-    g_hash_table_destroy(priv->timer_hash);
-    g_mutex_unlock(&priv->timer_lock);
-    g_mutex_clear(&priv->timer_lock);
+    g_object_unref(priv->itrain_server);
 
     g_mutex_lock(&priv->prop_mutex);
     g_hash_table_destroy(priv->cached_properties);
@@ -64,11 +41,6 @@ static void ipcam_itrain_init(IpcamITrain *self)
 {
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(self);
 
-    g_mutex_init(&priv->timer_lock);
-    priv->timer_hash = g_hash_table_new_full(g_direct_hash,
-                                             g_direct_equal,
-                                             NULL,
-                                             g_free);
     priv->cached_properties = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                     g_free, g_free);
 }
@@ -76,7 +48,6 @@ static void ipcam_itrain_init(IpcamITrain *self)
 static void ipcam_itrain_class_init(IpcamITrainClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
-    object_class->dispose = &ipcam_itrain_dispose;
     object_class->finalize = &ipcam_itrain_finalize;
     
     IpcamBaseServiceClass *base_service_class = IPCAM_BASE_SERVICE_CLASS(klass);
@@ -90,6 +61,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
     const gchar *addr = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:address");
     const gchar *port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:port");
+	const gchar *protocol = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:protocol");
 	JsonBuilder *builder;
 	const gchar *token = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "token");
 	IpcamRequestMessage *req_msg;
@@ -103,6 +75,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
                                        "itrain", itrain,
                                        "address", addr,
                                        "port", strtoul(port, NULL, 0),
+									   "protocol", protocol,
                                        NULL);
 
     ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(itrain), "video_occlusion_event", IPCAM_TYPE_ITRAIN_EVENT_HANDLER);
@@ -158,9 +131,6 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 
 static void ipcam_itrain_in_loop(IpcamBaseService *base_service)
 {
-    IpcamITrain *itrain = IPCAM_ITRAIN(base_service);
-
-    ipcam_itrain_timer_handler(G_OBJECT(itrain));
 }
 
 const gpointer ipcam_itrain_get_property(IpcamITrain *itrain, const gchar *key)
@@ -184,91 +154,26 @@ void ipcam_itrain_set_property(IpcamITrain *itrain, const gchar *key, gpointer v
     g_mutex_unlock(&priv->prop_mutex);
 }
 
-static void
-ipcam_itrain_timer_handler(GObject *obj)
-{
-    GHashTableIter iter;
-    gpointer key, value;
-    gint64 now = g_get_monotonic_time();
-    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(IPCAM_ITRAIN(obj));
-
-    g_mutex_lock(&priv->timer_lock);
-    g_hash_table_iter_init(&iter, priv->timer_hash);
-    while (g_hash_table_iter_next (&iter, &key, &value)) {
-        IpcamITrainTimer *timer = (IpcamITrainTimer *)key;
-
-        g_assert(timer && timer->handler);
-
-        if (now - timer->time_base >= timer->timeout_usec) {
-            timer->time_base += timer->timeout_usec;
-            timer->handler(timer->user_data);
-        }
-    }
-    g_mutex_unlock(&priv->timer_lock);
-}
-
-IpcamITrainTimer *
-ipcam_itrain_add_timer(IpcamITrain *itrain, guint timeout_sec,
-                       IpcamITrainTimerHandler *handler, gpointer user_data)
-{
-    IpcamITrainTimer *timer;
-    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
-
-    timer = g_malloc0(sizeof(*timer));
-    if (!timer)
-        return NULL;
-
-    timer->user_data = user_data;
-    timer->timeout_usec = timeout_sec * 1000000;
-    timer->time_base = g_get_monotonic_time();
-    timer->handler = handler;
-
-    g_mutex_lock(&priv->timer_lock);
-    g_hash_table_add(priv->timer_hash, timer);
-    g_mutex_unlock(&priv->timer_lock);
-
-    return timer;
-}
-
-void ipcam_itrain_del_timer(IpcamITrain *itrain, IpcamITrainTimer *timer)
-{
-    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
-
-    g_mutex_lock(&priv->timer_lock);
-    g_hash_table_remove(priv->timer_hash, timer);
-    g_mutex_unlock (&priv->timer_lock);
-}
-
-void ipcam_itrain_timer_reset(IpcamITrainTimer *timer)
-{
-    timer->time_base = g_get_monotonic_time();
-}
-
 void ipcam_itrain_video_occlusion_handler(IpcamITrain *itrain, JsonNode *body)
 {
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
     JsonObject *evt_obj = json_object_get_object_member(json_node_get_object(body), "event");
     gint region = -1;
     gint state = -1;
-    const gchar *carriage_num;
-    const gchar *position_num;
 
     g_return_if_fail(evt_obj);
-
-    carriage_num = ipcam_itrain_get_string_property(itrain, "szyc:carriage_num");
-    position_num = ipcam_itrain_get_string_property(itrain, "szyc:position_num");
 
     if (json_object_has_member(evt_obj, "region"))
         region = json_object_get_int_member(evt_obj, "region");
     if (json_object_has_member(evt_obj, "state"))
         state = json_object_get_boolean_member(evt_obj, "state");
 
-    if (region >= 0 && state >= 0 && carriage_num && position_num) {
-        ipcam_itrain_server_report_state(priv->itrain_server,
-                                         strtoul(carriage_num, NULL, 0),
-                                         strtoul(position_num, NULL, 0),
-                                         state,
-                                         0);
+    if (region >= 0 && state >= 0) {
+		gchar notify[64];
+		snprintf(notify, sizeof(notify),
+				 "OCCLUSION %d %d\n",
+				 region, state);
+		ipcam_itrain_server_send_notify(priv->itrain_server, notify, strlen(notify));
     }
 }
 

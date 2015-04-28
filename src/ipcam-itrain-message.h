@@ -8,45 +8,30 @@
 #ifndef _IPCAM_ITRAIN_MESSAGE_H_
 #define _IPCAM_ITRAIN_MESSAGE_H_
 
-#include <glib-object.h>
+#include <glib.h>
 
-G_BEGIN_DECLS
+#define PACKET_START        0xFF
 
-#define IPCAM_TYPE_ITRAIN_MESSAGE             (ipcam_itrain_message_get_type ())
-#define IPCAM_ITRAIN_MESSAGE(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), IPCAM_TYPE_ITRAIN_MESSAGE, IpcamITrainMessage))
-#define IPCAM_ITRAIN_MESSAGE_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), IPCAM_TYPE_ITRAIN_MESSAGE, IpcamITrainMessageClass))
-#define IPCAM_IS_ITRAIN_MESSAGE(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), IPCAM_TYPE_ITRAIN_MESSAGE))
-#define IPCAM_IS_ITRAIN_MESSAGE_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), IPCAM_TYPE_ITRAIN_MESSAGE))
-#define IPCAM_ITRAIN_MESSAGE_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), IPCAM_TYPE_ITRAIN_MESSAGE, IpcamITrainMessageClass))
+struct IpcamTrainPDU;
+typedef struct IpcamTrainPDU IpcamTrainPDU;
 
-typedef struct _IpcamITrainMessageClass IpcamITrainMessageClass;
-typedef struct _IpcamITrainMessage IpcamITrainMessage;
-typedef struct _IpcamITrainMessagePrivate IpcamITrainMessagePrivate;
+IpcamTrainPDU *ipcam_train_pdu_new(guint8 type, guint16 payload_size);
+IpcamTrainPDU *ipcam_train_pdu_new_from_buffer(guint8 *buffer, guint16 buffer_size);
+void ipcam_train_pdu_free(IpcamTrainPDU *pdu);
 
+guint8 ipcam_train_pdu_get_type(IpcamTrainPDU *pdu);
 
-struct _IpcamITrainMessageClass
-{
-    GObjectClass parent_class;
-};
+void ipcam_train_pdu_set_payload(IpcamTrainPDU *pdu, gpointer payload);
+gpointer ipcam_train_pdu_get_payload(IpcamTrainPDU *pdu);
+guint16 ipcam_train_pdu_get_payload_size(IpcamTrainPDU *pdu);
 
-struct _IpcamITrainMessage
-{
-    GObject parent_instance;
+gboolean ipcam_train_pdu_verify_checksum(IpcamTrainPDU *pdu);
+guint8 ipcam_train_pdu_checksum(IpcamTrainPDU *pdu);
+guint8 ipcam_train_pdu_get_checksum(IpcamTrainPDU *pdu);
+void   ipcam_train_pdu_set_checksum(IpcamTrainPDU *pdu, guint8 checksum);
 
-    IpcamITrainMessagePrivate *priv;
-};
-
-GType ipcam_itrain_message_get_type (void) G_GNUC_CONST;
-
-gpointer ipcam_itrain_message_get_userdata(IpcamITrainMessage *message);
-void ipcam_itrain_message_set_userdata(IpcamITrainMessage *message, gpointer user_data);
-guint ipcam_itrain_message_get_message_type(IpcamITrainMessage *message);
-void ipcam_itrain_message_set_message_type(IpcamITrainMessage *message, guint type);
-guint ipcam_itrain_message_get_payload_length(IpcamITrainMessage *message);
-gpointer ipcam_itrain_message_get_payload(IpcamITrainMessage *message, guint *length);
-void ipcam_itrain_message_set_payload(IpcamITrainMessage *message, gpointer payload, guint length);
-
-G_END_DECLS
+gpointer ipcam_train_pdu_get_packet_buffer(IpcamTrainPDU *pdu);
+guint16 ipcam_train_pdu_get_packet_size(IpcamTrainPDU *pdu);
 
 #endif /* _IPCAM_ITRAIN_MESSAGE_H_ */
 

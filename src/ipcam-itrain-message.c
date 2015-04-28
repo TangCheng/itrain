@@ -1,212 +1,160 @@
 /* -*- Mode: C; indent-tabs-mode: nil; c-basic-offset: 4; tab-width: 4 -*-  */
 /*
- * ipcam-proto-message.c
+ * ipcam-itrain-message.c
  * Copyright (C) 2014 Watson Xu <xuhuashan@gmail.com>
  *
  */
 
 #include "ipcam-itrain-message.h"
+#include <string.h>
+#include <arpa/inet.h>
 
-struct _IpcamITrainMessagePrivate
+typedef struct IpcamTrainPDUHeader
 {
-     gpointer user_data;
-     guint8 type;
-     guint16 length;
-     gpointer payload;
+    guint8 start;   /* should always be 0xff */
+    guint8 type;
+    guint16 payload_size;
+} __attribute__((packed)) IpcamTrainPDUHeader;
+
+struct IpcamTrainPDU
+{
+    IpcamTrainPDUHeader header;
+    guint8 payload[0];
 };
 
-
-enum
+static guint8 calculate_checksum(guint8 *p, guint len)
 {
-    PROP_0,
+    guint8 checksum = 0;
+    int i;
 
-    PROP_USERDATA,
-    PROP_TYPE,
-    PROP_LENGTH,
-    PROP_PAYLOAD
-};
+    for (i = 0; i < len; i++)
+        checksum ^= p[i];
 
-
-
-G_DEFINE_TYPE (IpcamITrainMessage, ipcam_itrain_message, G_TYPE_OBJECT);
-
-static void
-ipcam_itrain_message_init (IpcamITrainMessage *ipcam_itrain_message)
-{
-    ipcam_itrain_message->priv = G_TYPE_INSTANCE_GET_PRIVATE (ipcam_itrain_message, IPCAM_TYPE_ITRAIN_MESSAGE, IpcamITrainMessagePrivate);
-
-    ipcam_itrain_message->priv->user_data = NULL;
-    ipcam_itrain_message->priv->type = 0;
-    ipcam_itrain_message->priv->length = 0;
-    ipcam_itrain_message->priv->payload = NULL;
+    return checksum;
 }
 
-static void
-ipcam_itrain_message_finalize (GObject *object)
+IpcamTrainPDU *ipcam_train_pdu_new(guint8 type, guint16 payload_size)
 {
-    IpcamITrainMessage *message = IPCAM_ITRAIN_MESSAGE(object);
+    guint16 packet_size = sizeof(IpcamTrainPDUHeader) + payload_size + 1;
+    IpcamTrainPDU *pdu = g_malloc0(packet_size);
 
-    if (message->priv->payload)
-        g_free(message->priv->payload);
+    pdu->header.start = PACKET_START;
+    pdu->header.type = type;
+    pdu->header.payload_size = htons(payload_size);
 
-    G_OBJECT_CLASS (ipcam_itrain_message_parent_class)->finalize (object);
+    return pdu;
 }
 
-static void
-ipcam_itrain_message_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+IpcamTrainPDU *ipcam_train_pdu_new_from_buffer(guint8 *buffer, guint16 buffer_size)
 {
-    IpcamITrainMessage *message;
+    IpcamTrainPDU *pdu;
+    IpcamTrainPDUHeader *header = (IpcamTrainPDUHeader *)buffer;
+    guint16 payload_size;
+    guint16 pkt_size;
 
-    g_return_if_fail (IPCAM_IS_ITRAIN_MESSAGE (object));
+    g_return_val_if_fail(buffer_size > sizeof(*header), NULL);
+    g_return_val_if_fail(header->start == PACKET_START, NULL);
 
-    message = IPCAM_ITRAIN_MESSAGE(object);
+    payload_size = ntohs(header->payload_size);
+    g_return_val_if_fail(buffer_size >= sizeof(*header) + payload_size + 1, NULL);
 
-    switch (prop_id)
-    {
-    case PROP_USERDATA:
-        message->priv->user_data = g_value_get_pointer(value);
-        break;
-    case PROP_TYPE:
-        message->priv->type = g_value_get_uint(value);
-        break;
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-        break;
-    }
-}
+    pkt_size = sizeof(*header) + payload_size + 1;
 
-static void
-ipcam_itrain_message_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
-{
-    IpcamITrainMessage *message = IPCAM_ITRAIN_MESSAGE(object);
+    pdu = g_malloc(pkt_size);
 
-    g_return_if_fail (IPCAM_IS_ITRAIN_MESSAGE (object));
-
-    switch (prop_id)
-    {
-    case PROP_USERDATA:
-        g_value_set_pointer(value, message->priv->user_data);
-        break;
-    case PROP_TYPE:
-        g_value_set_uint(value, message->priv->type);
-        break;
-    case PROP_LENGTH:
-        g_value_set_uint(value, message->priv->type);
-        break;
-    case PROP_PAYLOAD:
-        g_value_set_pointer(value, message->priv->payload);
-        break;
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-        break;
-    }
-}
-
-static void
-ipcam_itrain_message_class_init (IpcamITrainMessageClass *klass)
-{
-    GObjectClass* object_class = G_OBJECT_CLASS (klass);
-
-    g_type_class_add_private (klass, sizeof (IpcamITrainMessagePrivate));
-
-    object_class->finalize = ipcam_itrain_message_finalize;
-    object_class->set_property = ipcam_itrain_message_set_property;
-    object_class->get_property = ipcam_itrain_message_get_property;
-
-    g_object_class_install_property (object_class,
-                                     PROP_USERDATA,
-                                     g_param_spec_pointer ("user_data",
-                                                           "User Data",
-                                                           "User Data",
-                                                           G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
-
-    g_object_class_install_property (object_class,
-                                     PROP_TYPE,
-                                     g_param_spec_uint ("type",
-                                                        "Message Type",
-                                                        "Message Type",
-                                                        0,
-                                                        G_MAXUINT8,
-                                                        0,
-                                                        G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
-
-    g_object_class_install_property (object_class,
-                                     PROP_LENGTH,
-                                     g_param_spec_uint ("length",
-                                                        "Message Length",
-                                                        "Message Length",
-                                                        0,
-                                                        G_MAXUINT16,
-                                                        0,
-                                                        G_PARAM_READABLE));
-
-    g_object_class_install_property (object_class,
-                                     PROP_USERDATA,
-                                     g_param_spec_pointer ("data",
-                                                           "User Data",
-                                                           "User Data",
-                                                           G_PARAM_READWRITE | G_PARAM_CONSTRUCT));
-}
-
-
-gpointer
-ipcam_itrain_message_get_userdata(IpcamITrainMessage *message)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    return priv->user_data;
-}
-
-void 
-ipcam_itrain_message_set_userdata(IpcamITrainMessage *message, gpointer user_data)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    priv->user_data = user_data;
-}
-
-guint 
-ipcam_itrain_message_get_message_type(IpcamITrainMessage *message)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    return priv->type;
-}
-
-void ipcam_itrain_message_set_message_type(IpcamITrainMessage *message, guint type)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    priv->type = type;
-}
-
-guint ipcam_itrain_message_get_payload_length(IpcamITrainMessage *message)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    return priv->length;
-}
-
-gpointer ipcam_itrain_message_get_payload(IpcamITrainMessage *message, guint *length)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    *length = priv->length;
-    return priv->payload;
-}
-
-void ipcam_itrain_message_set_payload(IpcamITrainMessage *message, gpointer payload, guint length)
-{
-    IpcamITrainMessagePrivate *priv = message->priv;
-
-    if (priv->payload) {
-        g_free(priv->payload);
-        priv->payload = NULL;
-        priv->length = 0;
+    if (pdu) {
+        memcpy(&pdu->header, buffer, pkt_size);
     }
 
-    if (payload && length) {
-        priv->payload = payload;
-        priv->length = length;
-    }
+    return pdu;
+}
+
+void ipcam_train_pdu_free(IpcamTrainPDU *pdu)
+{
+    g_free(pdu);
+}
+
+guint8 ipcam_train_pdu_get_type(IpcamTrainPDU *pdu)
+{
+    return pdu->header.type;
+}
+
+void ipcam_train_pdu_set_payload(IpcamTrainPDU *pdu, gpointer payload)
+{
+    guint16 payload_size = ntohs(pdu->header.payload_size);
+    guint8 *buffer;
+    guint16 buffer_size;
+
+    if (payload && payload_size > 0)
+        memcpy(pdu->payload, payload, payload_size);
+
+    /* recalculate checksum */
+    buffer = (guint8 *)&pdu->header;
+    buffer_size = sizeof(pdu->header) + payload_size;
+    guint8 checksum = calculate_checksum(buffer, buffer_size);
+    buffer[buffer_size] = checksum;
+}
+
+gpointer ipcam_train_pdu_get_payload(IpcamTrainPDU *pdu)
+{
+    return pdu->payload;
+}
+
+guint16 ipcam_train_pdu_get_payload_size(IpcamTrainPDU *pdu)
+{
+    return ntohs(pdu->header.payload_size);
+}
+
+gboolean ipcam_train_pdu_verify_checksum(IpcamTrainPDU *pdu)
+{
+    guint16 payload_size = ntohs(pdu->header.payload_size);
+    guint8 *buffer = (guint8 *)&pdu->header;
+    guint16 buffer_size = sizeof(pdu->header) + payload_size;
+
+    guint8 packet_checksum = buffer[buffer_size];
+    guint8 calculated_checksum = calculate_checksum(buffer, buffer_size);
+
+    return (packet_checksum == calculated_checksum);
+}
+
+guint8 ipcam_train_pdu_checksum(IpcamTrainPDU *pdu)
+{
+    guint16 payload_size = ntohs(pdu->header.payload_size);
+    guint8 *buffer = (guint8 *)&pdu->header;
+    guint16 buffer_size = sizeof(pdu->header) + payload_size;
+
+    return calculate_checksum(buffer, buffer_size);
+}
+
+guint8 ipcam_train_pdu_get_checksum(IpcamTrainPDU *pdu)
+{
+    guint16 payload_size = ntohs(pdu->header.payload_size);
+    guint8 *buffer = (guint8 *)&pdu->header;
+    guint16 buffer_size = sizeof(pdu->header) + payload_size;
+
+    return buffer[buffer_size];
+}
+
+void ipcam_train_pdu_set_checksum(IpcamTrainPDU *pdu, guint8 checksum)
+{
+    guint16 payload_size = ntohs(pdu->header.payload_size);
+    guint8 *buffer = (guint8 *)&pdu->header;
+    guint16 buffer_size = sizeof(pdu->header) + payload_size;
+
+    buffer[buffer_size] = checksum;
+}
+
+gpointer ipcam_train_pdu_get_packet_buffer(IpcamTrainPDU *pdu)
+{
+    return &pdu->header;
+}
+
+guint16 ipcam_train_pdu_get_packet_size(IpcamTrainPDU *pdu)
+{
+    guint16 pkt_size;
+
+    /* packet = header + payload + checksum */
+    pkt_size = sizeof(pdu->header) +ntohs(pdu->header.payload_size) + 1;
+
+    return pkt_size;
 }

@@ -17,16 +17,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.";
  */
 
-#include "itrain.h"
+#include "ipcam-itrain.h"
 
 int main()
 {
 	IpcamITrain *itrain = g_object_new(IPCAM_TYPE_ITRAIN, "name", "itrain", NULL);
 	ipcam_base_service_start(IPCAM_BASE_SERVICE(itrain));
-	ipcam_base_service_stop(IPCAM_BASE_SERVICE(itrain));
-	g_object_run_dispose(G_OBJECT(itrain));
-	g_object_unref(itrain);
-
 	return (0);
 }
 
