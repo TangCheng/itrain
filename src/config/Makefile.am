@@ -16,17 +16,3 @@ AM_CFLAGS =\
 conf_datadir = $(prefix)/itrain/config
 conf_data_DATA = \
 	app.yml
-
-PROTOCOL ?= DCTX
-
-if WITH_DCTX_PROJECT
-override PROTOCOL = DCTX
-endif
-
-if WITH_DTTX_PROJECT
-override PROTOCOL = DTTX
-endif
-
-install-data-hook:
-	sed -i -r "/^itrain:$$/,/^.*:$$/ s/protocol:.*/protocol: $(PROTOCOL)/g" \
-		$(DESTDIR)$(prefix)/itrain/config/app.yml
