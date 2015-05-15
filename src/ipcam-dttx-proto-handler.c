@@ -33,6 +33,8 @@ typedef struct IpcamDttxConnectionPriv
 #define MSGTYPE_QUERYSTATUS_REQUEST     0x07
 #define MSGTYPE_QUERYSTATUS_RESPONSE    0x57
 #define MSGTYPE_VIDEO_FAULT_EVENT       0x08
+#define MSGTYPE_SET_TRAIN_NUM_REQUEST   0x11
+#define MSGTYPE_SET_TRAIN_NUM_RESPONSE  0x61
 #define MSGTYPE_SETNETWORK_REQUEST      0x12
 
 /* Payload definitions */
@@ -65,10 +67,20 @@ typedef struct VideoFaultEvent
     guint8  loss_stat;
 } __attribute__((packed)) VideoFaultEvent;
 
+typedef struct SetTrainNumRequest
+{
+    guint32  train_num;
+} __attribute__((packed)) SetTrainNumRequest;
+
+typedef struct SetTrainNumResponse
+{
+    guint8  result;
+} __attribute__((packed)) SetTrainNumResponse;
+
 typedef struct SetNetworkRequest
 {
     guint8  network_num;
-} SetNetworkRequest;
+} __attribute__((packed)) SetNetworkRequest;
 
 
 static gboolean
@@ -183,6 +195,30 @@ ipcam_proto_do_query_status(IpcamITrain *itrain, QueryStatusResponse *payload)
     return TRUE;
 }
 
+static gboolean
+ipcam_proto_do_set_train_num(IpcamITrain *itrain, SetTrainNumRequest *payload)
+{
+    gboolean ret;
+    char buf[32];
+    guint32 train_num = ntohl(payload->train_num);
+    JsonBuilder *builder = json_builder_new();
+
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "items");
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "train_num");
+    snprintf(buf, sizeof(buf), "%d", train_num);
+    json_builder_add_string_value(builder, buf);
+    json_builder_end_object(builder);
+    json_builder_end_object(builder);
+
+    ret = itrain_invocate_action(itrain, "set_szyc", json_builder_get_root(builder), NULL);
+
+    g_object_unref(builder);
+
+    return ret;
+}
+
 gboolean
 ipcam_dttx_heartbeat(IpcamConnection *conn, IpcamTrainPDU *request_pdu)
 {
@@ -213,6 +249,43 @@ ipcam_dttx_query_status(IpcamConnection *conn, IpcamTrainPDU *request_pdu)
     }
 
     return result;
+}
+
+gboolean
+ipcam_dttx_set_train_num(IpcamConnection *conn, IpcamTrainPDU *request_pdu)
+{
+    IpcamITrain *itrain = conn->itrain;
+    SetTrainNumRequest *payload;
+    guint16 payload_size;
+
+    ipcam_connection_reset_timeout(conn, TIMEOUT_RECV_HEARTBEAT);
+
+    g_assert(IPCAM_IS_ITRAIN(itrain));
+
+    payload = ipcam_train_pdu_get_payload(request_pdu);
+    payload_size = ipcam_train_pdu_get_payload_size(request_pdu);
+    if (payload && payload_size >= sizeof(*payload)) {
+        SetTrainNumResponse response_payload;
+        IpcamTrainPDU *response_pdu;
+        gboolean result;
+
+        result = ipcam_proto_do_set_train_num(itrain, payload);
+
+        response_pdu = ipcam_train_pdu_new(MSGTYPE_SET_TRAIN_NUM_RESPONSE,
+                                               sizeof(response_payload));
+        if (response_pdu) {
+            response_payload.result = result ? 1 : 0;
+            ipcam_train_pdu_set_payload(response_pdu, &response_payload);
+            result = ipcam_connection_send_pdu(conn, response_pdu);
+            ipcam_train_pdu_free(response_pdu);
+        }
+        return TRUE;
+    }
+    else {
+        g_warning("%s: payload size is too small.\n", __func__);
+    }
+
+    return TRUE;
 }
 
 gboolean
@@ -250,6 +323,9 @@ static gboolean ipcam_dttx_dispatch_pdu(IpcamConnection *conn, IpcamTrainPDU *pd
         break;
     case MSGTYPE_QUERYSTATUS_REQUEST:
         ret = ipcam_dttx_query_status(conn, pdu);
+        break;
+    case MSGTYPE_SET_TRAIN_NUM_REQUEST:
+        ret = ipcam_dttx_set_train_num(conn, pdu);
         break;
     case MSGTYPE_SETNETWORK_REQUEST:
         ret = ipcam_dttx_set_network(conn, pdu);

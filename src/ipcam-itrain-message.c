@@ -54,7 +54,7 @@ IpcamTrainPDU *ipcam_train_pdu_new_from_buffer(guint8 *buffer, guint16 buffer_si
 
     g_return_val_if_fail(buffer_size > sizeof(*header), NULL);
     g_return_val_if_fail(header->start == PACKET_START, NULL);
-
+    
     payload_size = ntohs(header->payload_size);
     g_return_val_if_fail(buffer_size >= sizeof(*header) + payload_size + 1, NULL);
 
