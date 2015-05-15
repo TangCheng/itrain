@@ -61,7 +61,6 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
     const gchar *addr = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:address");
     const gchar *port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:port");
-	const gchar *protocol = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:protocol");
 	JsonBuilder *builder;
 	const gchar *token = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "token");
 	IpcamRequestMessage *req_msg;
@@ -75,7 +74,6 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
                                        "itrain", itrain,
                                        "address", addr,
                                        "port", strtoul(port, NULL, 0),
-									   "protocol", protocol,
                                        NULL);
 
     ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(itrain), "video_occlusion_event", IPCAM_TYPE_ITRAIN_EVENT_HANDLER);
@@ -104,7 +102,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 	                       NULL);
 	ipcam_base_app_send_message(IPCAM_BASE_APP(itrain), IPCAM_MESSAGE(req_msg),
 	                            "iconfig", token,
-	                            base_info_message_handler, 5);
+	                            base_info_message_handler, 10);
 	g_object_unref(req_msg);
 	g_object_unref(builder);
 
@@ -124,7 +122,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 	                       NULL);
 	ipcam_base_app_send_message(IPCAM_BASE_APP(itrain), IPCAM_MESSAGE(req_msg),
 	                            "iconfig", token,
-	                            szyc_message_handler, 5);
+	                            szyc_message_handler, 10);
 	g_object_unref(req_msg);
 	g_object_unref(builder);
 }
@@ -198,6 +196,7 @@ void ipcam_itrain_update_base_info_setting(IpcamITrain *itrain, JsonNode *body)
 static void base_info_message_handler(GObject *obj, IpcamMessage *msg, gboolean timeout)
 {
 	IpcamITrain *itrain = IPCAM_ITRAIN(obj);
+    IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
 	g_assert(IPCAM_IS_ITRAIN(itrain));
 
 	if (!timeout && msg) {
@@ -206,6 +205,16 @@ static void base_info_message_handler(GObject *obj, IpcamMessage *msg, gboolean 
 		if (body)
 			ipcam_itrain_update_base_info_setting(itrain, body);
 	}
+
+    const gchar *model = ipcam_itrain_get_string_property(itrain, "base_info:model");
+    const gchar *protocol = "DCTX";
+    if (model) {
+        if (g_ascii_strncasecmp(model, "DTTX", 4) == 0)
+            protocol = "DTTX";
+
+        g_object_set(priv->itrain_server, "protocol", protocol, NULL);
+    }
+    g_print("ITrain: Using %s protocol.\n", protocol);
 }
 
 void ipcam_itrain_update_szyc_setting(IpcamITrain *itrain, JsonNode *body)

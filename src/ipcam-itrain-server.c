@@ -134,18 +134,16 @@ ipcam_itrain_server_set_property (GObject *object, guint prop_id, const GValue *
         if (protocol) {
             if (strcasecmp(protocol, "DTTX") == 0) {
                 priv->protocol = &ipcam_dttx_protocol_type;
-                g_print("Using DTTX protocol\n");
             }
             else if (strcasecmp(protocol, "DCTX") == 0) {
                 priv->protocol = &ipcam_dctx_protocol_type;
-                g_print("Using DCTX protocol\n");
             }
             else {
-                g_print("Invalid protocol, using default DCTX\n");
+                g_warning("Invalid protocol, using default DCTX\n");
             }
         }
         else {
-            g_print("Protocol not specified, using default DCTX\n");
+            g_warning("Protocol not specified, using default DCTX\n");
         }
         break;
     case PROP_ADDRESS:
@@ -215,7 +213,7 @@ ipcam_itrain_server_class_init (IpcamITrainServerClass *klass)
                                                           "Communication Protocol",
                                                           "Communication Protocol",
                                                           "DCTX",
-                                                          G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
+                                                          G_PARAM_WRITABLE | G_PARAM_CONSTRUCT));
 
     g_object_class_install_property (object_class,
                                      PROP_ADDRESS,
