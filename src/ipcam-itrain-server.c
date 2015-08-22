@@ -6,11 +6,14 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 #include "ipcam-itrain.h"
 #include "ipcam-proto-interface.h"
@@ -25,10 +28,13 @@ struct _IpcamITrainServerPrivate
     gchar *address;
     guint port;
     gboolean terminated;
+    gboolean occlusion_stat;
     GThread *server_thread;
     GList *conn_list;
     IpcamTrainProtocolType *protocol;
     int server_sock;
+    int mcast_sock;
+    int mcast_timer_count;
     int pipe_fds[2];
 #define pipe_read_fd    pipe_fds[0]
 #define pipe_write_fd   pipe_fds[1]
@@ -62,10 +68,13 @@ ipcam_itrain_server_init (IpcamITrainServer *ipcam_itrain_server)
     priv->address = NULL;
     priv->port = 0;
     priv->terminated = FALSE;
+    priv->occlusion_stat = FALSE;
     priv->server_thread = NULL;
     priv->conn_list = NULL;
     priv->protocol = &ipcam_dctx_protocol_type;
     priv->server_sock = -1;
+    priv->mcast_sock = -1;
+    priv->mcast_timer_count = 0;
     priv->pipe_read_fd = -1;
     priv->pipe_write_fd = -1;
     priv->epoll_fd = -1;
@@ -461,12 +470,16 @@ itrain_pipe_epoll_handler(struct epoll_event *event)
                 int  state;
 
                 if (sscanf(buffer, "%s %d %d", cmd, &region, &state) == 3) {
+                    priv->occlusion_stat = !!state;
                     ipcam_itrain_server_report_status(itrain_server, state, 0);
                 }
             }
         }
     }
 }
+
+#define MULTICAST_GROUP     ("224.0.0.88")
+#define MULTICAST_PORT      (10100)
 
 static void
 itrain_server_timeout_handler(IpcamITrainServer *itrain_server)
@@ -496,6 +509,36 @@ itrain_server_timeout_handler(IpcamITrainServer *itrain_server)
                 protocol->on_timeout(conn, i);
             }
         }
+    }
+
+    if (priv->mcast_timer_count == 0) {
+        priv->mcast_timer_count = 10 * 5;
+
+        const char *train_num, *position_num;
+        train_num = ipcam_itrain_get_string_property(priv->itrain, "szyc:train_num");
+        position_num = ipcam_itrain_get_string_property(priv->itrain, "szyc:position_num");
+
+        if (train_num && position_num) {
+            struct sockaddr_in mcast_addr;
+            mcast_addr.sin_family = AF_INET;
+            mcast_addr.sin_addr.s_addr = inet_addr(MULTICAST_GROUP);
+            mcast_addr.sin_port = htons(MULTICAST_PORT);
+            struct {
+                guint32 train_num;
+                guint8  position_num;
+                guint8  occlusion_stat;
+              guint8  loss_stat;
+            } __attribute__((packed)) mcast_event;
+            mcast_event.train_num = htonl(strtoul(train_num, NULL, 0));
+            mcast_event.position_num = strtoul(position_num, NULL, 0);
+            mcast_event.occlusion_stat = priv->occlusion_stat;
+            mcast_event.loss_stat = 0;
+            sendto(priv->mcast_sock, &mcast_event, sizeof(mcast_event), 0,
+                   (struct sockaddr*)&mcast_addr, sizeof(mcast_addr));
+        }
+    }
+    else {
+        --priv->mcast_timer_count;
     }
 }
 
@@ -562,6 +605,22 @@ itrain_server_thread_proc(gpointer data)
               EPOLL_CTL_ADD,
               priv->pipe_read_fd,
               &pipe_event);
+
+    /* setup multi-cast socket */
+    priv->mcast_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    /* default interface to eth0 */
+    struct ifreq ifr;
+    strncpy(ifr.ifr_name, "eth0", IFNAMSIZ);
+    if (ioctl(priv->mcast_sock, SIOCGIFINDEX, &ifr) == 0) {
+        struct ip_mreqn mreqn;
+        mreqn.imr_multiaddr.s_addr = inet_addr(MULTICAST_GROUP);
+        mreqn.imr_address.s_addr = htonl(INADDR_ANY);
+        mreqn.imr_ifindex = ifr.ifr_ifindex;
+        if (setsockopt(priv->mcast_sock, IPPROTO_IP, IP_MULTICAST_IF,
+                       &mreqn, sizeof(mreqn)) < 0) {
+            perror("setsockopt():IP_MULTICAST_IF");
+        }
+    }
 
     while (!priv->terminated) {
         struct epoll_event ep_event;

@@ -102,7 +102,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 	                       NULL);
 	ipcam_base_app_send_message(IPCAM_BASE_APP(itrain), IPCAM_MESSAGE(req_msg),
 	                            "iconfig", token,
-	                            base_info_message_handler, 10);
+	                            base_info_message_handler, 60);
 	g_object_unref(req_msg);
 	g_object_unref(builder);
 
@@ -122,7 +122,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
 	                       NULL);
 	ipcam_base_app_send_message(IPCAM_BASE_APP(itrain), IPCAM_MESSAGE(req_msg),
 	                            "iconfig", token,
-	                            szyc_message_handler, 10);
+	                            szyc_message_handler, 60);
 	g_object_unref(req_msg);
 	g_object_unref(builder);
 }
