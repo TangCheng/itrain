@@ -61,6 +61,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
     IpcamITrainPrivate *priv = ipcam_itrain_get_instance_private(itrain);
     const gchar *addr = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:address");
     const gchar *port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:port");
+	const gchar *osd_port = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "itrain:osd-port");
 	JsonBuilder *builder;
 	const gchar *token = ipcam_base_app_get_config(IPCAM_BASE_APP(itrain), "token");
 	IpcamRequestMessage *req_msg;
@@ -74,6 +75,7 @@ static void ipcam_itrain_before_start(IpcamBaseService *base_service)
                                        "itrain", itrain,
                                        "address", addr,
                                        "port", strtoul(port, NULL, 0),
+                                       "osd-port", strtoul(osd_port, NULL, 0),
                                        NULL);
 
     ipcam_base_app_register_notice_handler(IPCAM_BASE_APP(itrain), "video_occlusion_event", IPCAM_TYPE_ITRAIN_EVENT_HANDLER);

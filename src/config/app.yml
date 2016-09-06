@@ -4,6 +4,10 @@ connect:
 subscribe:
   iconfig_pub: tcp://127.0.0.1:65401
   imedia_rtsp_pub: tcp://127.0.0.1:65402
+publish:
+  itrain_pub: tcp://127.0.0.1:65403
 itrain:
   address: 0.0.0.0
   port: 10100
+  osd-address: 0.0.0.0
+  osd-port: 10101

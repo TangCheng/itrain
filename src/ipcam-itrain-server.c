@@ -15,6 +15,8 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 
+#include <notice_message.h>
+
 #include "ipcam-itrain.h"
 #include "ipcam-proto-interface.h"
 #include "ipcam-itrain-server.h"
@@ -27,12 +29,15 @@ struct _IpcamITrainServerPrivate
     IpcamITrain *itrain;
     gchar *address;
     guint port;
+    gchar *osd_address;
+    guint osd_port;
     gboolean terminated;
     gboolean occlusion_stat;
     GThread *server_thread;
     GList *conn_list;
     IpcamTrainProtocolType *protocol;
     int server_sock;
+    int osd_server_sock;
     int mcast_sock;
     int mcast_timer_count;
     int pipe_fds[2];
@@ -49,7 +54,9 @@ enum
     PROP_ITRAIN,
     PROP_PROTOCOL,
     PROP_ADDRESS,
-    PROP_PORT
+    PROP_PORT,
+    PROP_OSD_ADDRESS,
+    PROP_OSD_PORT,
 };
 
 
@@ -67,12 +74,15 @@ ipcam_itrain_server_init (IpcamITrainServer *ipcam_itrain_server)
     priv->itrain = NULL;
     priv->address = NULL;
     priv->port = 0;
+    priv->osd_address = NULL;
+    priv->osd_port = 0;
     priv->terminated = FALSE;
     priv->occlusion_stat = FALSE;
     priv->server_thread = NULL;
     priv->conn_list = NULL;
     priv->protocol = &ipcam_dctx_protocol_type;
     priv->server_sock = -1;
+    priv->osd_server_sock = -1;
     priv->mcast_sock = -1;
     priv->mcast_timer_count = 0;
     priv->pipe_read_fd = -1;
@@ -114,6 +124,7 @@ ipcam_itrain_server_finalize (GObject *object)
     gchar *quit_cmd = "QUIT\n";
 
     g_free(priv->address);
+    g_free(priv->osd_address);
     priv->terminated = TRUE;
     ipcam_itrain_server_send_notify(itrain_server, quit_cmd, strlen(quit_cmd));
     g_thread_join(priv->server_thread);
@@ -162,6 +173,13 @@ ipcam_itrain_server_set_property (GObject *object, guint prop_id, const GValue *
     case PROP_PORT:
         priv->port = g_value_get_uint(value);
         break;
+    case PROP_OSD_ADDRESS:
+        g_free(priv->osd_address);
+        priv->osd_address =  g_value_dup_string(value);
+        break;
+    case PROP_OSD_PORT:
+        priv->osd_port = g_value_get_uint(value);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
         break;
@@ -189,6 +207,12 @@ ipcam_itrain_server_get_property (GObject *object, guint prop_id, GValue *value,
         break;
     case PROP_PORT:
         g_value_set_uint(value, priv->port);
+        break;
+    case PROP_OSD_ADDRESS:
+        g_value_set_string(value, priv->osd_address);
+        break;
+    case PROP_OSD_PORT:
+        g_value_set_uint(value, priv->osd_port);
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -240,6 +264,24 @@ ipcam_itrain_server_class_init (IpcamITrainServerClass *klass)
                                                         0,
                                                         G_MAXUINT,
                                                         10100,
+                                                        G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
+
+    g_object_class_install_property (object_class,
+                                     PROP_ADDRESS,
+                                     g_param_spec_string ("osd-address",
+                                                          "OSD Server Address",
+                                                          "OSD Server Address",
+                                                          "0.0.0.0",
+                                                          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
+
+    g_object_class_install_property (object_class,
+                                     PROP_PORT,
+                                     g_param_spec_uint ("osd-port",
+                                                        "OSD Server Port",
+                                                        "OSD Server Port",
+                                                        0,
+                                                        G_MAXUINT,
+                                                        10101,
                                                         G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
 }
 
@@ -542,6 +584,100 @@ itrain_server_timeout_handler(IpcamITrainServer *itrain_server)
     }
 }
 
+typedef struct SetOSDRequest
+{
+    guint8 head;    /* 0xff */
+    guint8 code;    /* function code */
+    guint8 keeptime;   /* time to keep on screen */
+    guint16 x;       /* X position */
+    guint16 y;       /* Y position */
+    guint16 fontsize;
+    guint16 length;  /* max to 1024 */
+    guint8 data[1024];
+    guint8 csum;
+} __attribute__((packed)) SetOSDRequest;
+
+static void
+itrain_osd_server_epoll_handler(struct epoll_event *event)
+{
+    IpcamITrain *itrain;
+    EpollEventHandler *handler = event->data.ptr;
+    IpcamITrainServer *itrain_server = (IpcamITrainServer *)handler->data;
+    IpcamITrainServerPrivate *priv = itrain_server->priv;
+    struct sockaddr_in peer_addr;
+    socklen_t peer_len = sizeof(peer_addr);
+
+    g_object_get(itrain_server, "itrain", &itrain, NULL);
+    g_assert(IPCAM_IS_ITRAIN(itrain));
+
+    if (event->events & EPOLLIN) {
+        SetOSDRequest req;
+        int n = recvfrom(priv->osd_server_sock, &req, sizeof(req), 0,
+                         (struct sockaddr*)&peer_addr, &peer_len);
+        if (n < sizeof(req)) {
+            g_print("invalid set osd request\n");
+            return;
+        }
+        if ((req.head != 0xff) || (req.code != 0x09)) {
+            g_print("invalid request %02x %02x\n", (int)req.head, (int)req.code);
+            return;
+        }
+
+        IpcamMessage *notice_msg;
+        JsonBuilder *builder;
+        JsonNode *notice_body;
+
+        builder = json_builder_new();
+        json_builder_begin_object(builder);
+        json_builder_set_member_name(builder, "items");
+        json_builder_begin_object(builder);
+        json_builder_set_member_name(builder, "master");
+        json_builder_begin_object(builder);
+        json_builder_set_member_name(builder, "speed_gps");
+        json_builder_begin_object(builder);
+        json_builder_set_member_name(builder, "isshow");
+        json_builder_add_boolean_value(builder, TRUE);
+        json_builder_set_member_name(builder, "size");
+        json_builder_add_int_value(builder, (guint64)ntohs(req.fontsize));
+        json_builder_set_member_name(builder, "left");
+        json_builder_add_int_value(builder, (guint64)ntohs(req.x));
+        json_builder_set_member_name(builder, "top");
+        json_builder_add_int_value(builder, (guint64)ntohs(req.y));
+        json_builder_set_member_name(builder, "color");
+        json_builder_begin_object(builder);
+        json_builder_set_member_name(builder, "red");
+        json_builder_add_int_value(builder, 0);
+        json_builder_set_member_name(builder, "green");
+        json_builder_add_int_value(builder, 0);
+        json_builder_set_member_name(builder, "blue");
+        json_builder_add_int_value(builder, 0);
+        json_builder_set_member_name(builder, "alpha");
+        json_builder_add_int_value(builder, 0);
+        json_builder_end_object(builder); // color
+        json_builder_set_member_name(builder, "text");
+        json_builder_add_string_value(builder, req.data);
+        json_builder_end_object(builder); // speed_gps
+        json_builder_end_object(builder); // master
+        json_builder_end_object(builder); // items
+        json_builder_end_object(builder); // root
+
+        notice_body = json_builder_get_root(builder);
+        g_object_unref(builder);
+
+        notice_msg = g_object_new(IPCAM_NOTICE_MESSAGE_TYPE,
+                                  "event", "set_osd",
+                                  "body", notice_body, NULL);
+        ipcam_base_app_send_message(IPCAM_BASE_APP(itrain),
+                                    notice_msg,
+                                    "itrain_pub",
+                                    "itrain_token",
+                                    NULL,
+                                    0);
+
+        g_object_unref(notice_msg);
+    }
+}
+
 static gpointer
 itrain_server_thread_proc(gpointer data)
 {
@@ -549,48 +685,86 @@ itrain_server_thread_proc(gpointer data)
     IpcamITrainServer *itrain_server = IPCAM_ITRAIN_SERVER(data);
     IpcamITrainServerPrivate *priv = itrain_server->priv;
     gchar *address;
+    gchar *osd_address;
     guint port;
+    guint osd_port;
     struct epoll_event server_event;
+    struct epoll_event osd_server_event;
     struct epoll_event pipe_event;
     EpollEventHandler server_handler;
+    EpollEventHandler osd_server_handler;
     EpollEventHandler pipe_handler;
     int reuse_addr = 1;
 
     g_object_get(itrain_server, "itrain", &itrain, NULL);
     g_assert(IPCAM_IS_ITRAIN(itrain));
 
-    g_object_get(itrain_server, "address", &address, "port", &port, NULL);
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    g_assert(inet_aton(address, &server_addr.sin_addr));
-    server_addr.sin_port = (in_port_t)htons(port);
-    g_free(address);
-
-    priv->server_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    g_assert(priv->server_sock != -1);
-
-    setsockopt(priv->server_sock, SOL_SOCKET, SO_REUSEADDR,
-               &reuse_addr, sizeof(reuse_addr));
-    fcntl(priv->server_sock, F_SETFL, O_NONBLOCK);
-
-    g_assert(bind(priv->server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == 0);
-    g_assert(listen(priv->server_sock, 10) == 0);
-
     /* create epoll fd */
     priv->epoll_fd = epoll_create(10);
     g_assert(priv->epoll_fd != -1);
 
-    /* add server socket to epoll */
-    server_handler.event_handler = itrain_server_epoll_handler;
-    server_handler.data = itrain_server;
+    /* setup server socket */
+    g_object_get(itrain_server, "address", &address, "port", &port, NULL);
+    if (address && port) {
+        struct sockaddr_in server_addr;
+        server_addr.sin_family = AF_INET;
+        g_assert(inet_aton(address, &server_addr.sin_addr));
+        server_addr.sin_port = (in_port_t)htons(port);
 
-    server_event.events = EPOLLIN | EPOLLRDHUP;
-    server_event.data.ptr = &server_handler;
+        priv->server_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+        g_assert(priv->server_sock != -1);
 
-    epoll_ctl(priv->epoll_fd,
-              EPOLL_CTL_ADD,
-              priv->server_sock,
-              &server_event);
+        setsockopt(priv->server_sock, SOL_SOCKET, SO_REUSEADDR,
+                   &reuse_addr, sizeof(reuse_addr));
+        fcntl(priv->server_sock, F_SETFL, O_NONBLOCK);
+
+        g_assert(bind(priv->server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == 0);
+        g_assert(listen(priv->server_sock, 10) == 0);
+
+        /* add server socket to epoll */
+        server_handler.event_handler = itrain_server_epoll_handler;
+        server_handler.data = itrain_server;
+
+        server_event.events = EPOLLIN | EPOLLRDHUP;
+        server_event.data.ptr = &server_handler;
+
+        epoll_ctl(priv->epoll_fd,
+                  EPOLL_CTL_ADD,
+                  priv->server_sock,
+                  &server_event);
+    }
+    g_free(address);
+
+    /* setup osd server socket */
+    g_object_get(itrain_server, "osd-address", &osd_address, "osd-port", &osd_port, NULL);
+    if (osd_address && osd_port) {
+        struct sockaddr_in osd_server_addr;
+        osd_server_addr.sin_family = AF_INET;
+        g_assert(inet_aton(osd_address, &osd_server_addr.sin_addr));
+        osd_server_addr.sin_port = (in_port_t)htons(osd_port);
+
+        priv->osd_server_sock = socket(PF_INET, SOCK_DGRAM, 0);
+        g_assert(priv->osd_server_sock != -1);
+        setsockopt(priv->osd_server_sock, SOL_SOCKET, SO_REUSEADDR,
+                   &reuse_addr, sizeof(reuse_addr));
+        fcntl(priv->osd_server_sock, F_SETFL, O_NONBLOCK);
+
+        g_assert(bind(priv->osd_server_sock, (struct sockaddr*)&osd_server_addr,
+                      sizeof(osd_server_addr)) == 0);
+
+        /* add osd server socket to epoll */
+        osd_server_handler.event_handler = itrain_osd_server_epoll_handler;
+        osd_server_handler.data = itrain_server;
+
+        osd_server_event.events = EPOLLIN | EPOLLRDHUP;
+        osd_server_event.data.ptr = &osd_server_handler;
+
+        epoll_ctl(priv->epoll_fd,
+                  EPOLL_CTL_ADD,
+                  priv->osd_server_sock,
+                  &osd_server_event);
+    }
+    g_free(osd_address);
 
     /* create pipe and add it to epoll */
     g_assert(pipe(priv->pipe_fds) == 0);
